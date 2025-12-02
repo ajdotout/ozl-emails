@@ -32,6 +32,7 @@ logs/
 node_modules/
 dist/
 build/
+!/email-templates/dist/
 
 # Docker
 *.pid

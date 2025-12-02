@@ -1,0 +1,31 @@
+{
+  "name": "ozl-email-templates",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shared React Email templates for OZL backend services",
+  "main": "build/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsx src/build.tsx"
+  },
+  "keywords": [
+    "email",
+    "templates",
+    "react-email",
+    "ozl"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@react-email/render": "^2.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@react-email/components": "^1.0.1",
+    "react-email": "^5.0.5"
+  }
+}
