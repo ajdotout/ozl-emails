@@ -1,0 +1,18 @@
+OZListings
+
+
+NEW ACTIVITY ON YOUR OZ LISTING
+
+Hi {{developer_name}},
+
+Someone who visited your listing {{listing_slug}} (email: {{user_email}}) just reached out with a {{event type}} inquiry.
+
+Summary
+
+Type: {{event type}}
+Listing: {{listing_slug}}
+Contact email: {{user_email}}
+
+You are receiving this email because you’re listed as the developer contact for this opportunity on OZListings.
+
+© 2025 OZListings. All rights reserved.
