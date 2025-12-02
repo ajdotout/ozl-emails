@@ -10,8 +10,9 @@ import logging
 from typing import Any, Dict, Optional
 
 from config import Config
+# from email_sender import send_sparkpost_email  # Uncomment when enabling real email sends
 
-from supabase import Client, acreate_client, create_client
+from supabase import Client, acreate_client
 
 
 # Configure logging:
@@ -35,12 +36,11 @@ logger.addHandler(_handler)
 logger.propagate = False
 
 
-# Global sync client for lookups (views, listings, etc.)
-db_client: Optional[Client] = None
-
-
-def handle_realtime_event(payload: Dict[str, Any]) -> None:
-    """Handle incoming realtime events from Supabase (sync callback)."""
+async def handle_realtime_event(
+    payload: Dict[str, Any],
+    supabase: Client,
+) -> None:
+    """Handle incoming realtime events from Supabase (async callback)."""
     # Supabase realtime payload shape:
     # {
     #   "data": {
@@ -70,16 +70,10 @@ def handle_realtime_event(payload: Dict[str, Any]) -> None:
         )
         return
 
-    if db_client is None:
-        logger.error(
-            "[orchestrator] db_client is not initialized; cannot look up user/listing"
-        )
-        return
-
     try:
         # Fetch enriched event including user email from the view
         event_resp = (
-            db_client.table("user_events_with_email")
+            await supabase.table("user_events_with_email")
             .select("*")
             .eq("id", event_id)
             .single()
@@ -105,13 +99,18 @@ def handle_realtime_event(payload: Dict[str, Any]) -> None:
     if not slug:
         logger.warning(
             "[orchestrator] Could not determine listing slug for event",
-            extra={"event_id": event_id, "event_type": event_type, "endpoint": endpoint, "metadata": metadata},
+            extra={
+                "event_id": event_id,
+                "event_type": event_type,
+                "endpoint": endpoint,
+                "metadata": metadata,
+            },
         )
         return
 
     try:
         listing_resp = (
-            db_client.table("listings")
+            await supabase.table("listings")
             .select(
                 "slug, developer_contact_email, developer_ca_email, developer_entity_name, developer_ca_name"
             )
@@ -169,18 +168,34 @@ def handle_realtime_event(payload: Dict[str, Any]) -> None:
         },
     )
 
+    # Example of how to actually send the email via SparkPost once ready:
+    #
+    # if event_type in {"request_vault_access", "contact_developer"}:
+    #     subject = f"OZL notification: {event_type.replace('_', ' ').title()}"
+    #     html_body = "<p>A user has triggered an event on your listing.</p>"
+    #     text_body = "A user has triggered an event on your listing."
+    #
+    #     # NOTE: handle_realtime_event is async and is scheduled via asyncio.create_task
+    #     # in the on_postgres_change wrapper, so it is safe to await other async
+    #     # operations (like send_sparkpost_email) directly here.
+    #     #
+    #     # await send_sparkpost_email(
+    #     #     to_email=developer_email,
+    #     #     subject=subject,
+    #     #     html_body=html_body,
+    #     #     text_body=text_body,
+    #     #     metadata={
+    #     #         "event_id": str(event_id),
+    #     #         "event_type": event_type,
+    #     #         "listing_slug": slug,
+    #     #         "user_email": user_email,
+    #     #     },
+    #     # )
+
 
 async def main() -> None:
     """Async entrypoint that sets up the Supabase realtime subscription."""
     Config.validate()
-
-    # Initialize global sync client for lookups
-    global db_client
-    if db_client is None:
-        db_client = create_client(
-            Config.SUPABASE_URL,
-            Config.SUPABASE_SERVICE_ROLE_KEY,
-        )
 
     # 1. Initialize the client asynchronously using acreate_client
     supabase: Client = await acreate_client(
@@ -191,11 +206,19 @@ async def main() -> None:
     # 2. Create a channel and subscribe to changes on the user_events table
     channel = supabase.channel("user-events-realtime")
 
+    def on_postgres_change(payload: Dict[str, Any]) -> None:
+        """Wrapper to bind Supabase client into the event handler.
+
+        The realtime library expects a sync callback, so we schedule the async
+        handler on the current event loop instead of awaiting it here.
+        """
+        asyncio.create_task(handle_realtime_event(payload, supabase))
+
     await channel.on_postgres_changes(
-        event="INSERT",       # can change to "*" later if needed
+        event="INSERT",  # can change to "*" later if needed
         schema="public",
         table="user_events",
-        callback=handle_realtime_event,
+        callback=on_postgres_change,
     ).subscribe()
 
     logger.info("Listening for INSERT changes on 'user_events' table...")
