@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { DeveloperNotification } from "./templates/DeveloperNotification";
+import { OutreachMarketing } from "./templates/OutreachMarketing";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -22,5 +23,6 @@ async function writeTemplate(name: string, component: React.ReactElement) {
 
 // Register templates here so they are built into dist/.
 await writeTemplate("developer-notification", <DeveloperNotification />);
+await writeTemplate("outreach-marketing", <OutreachMarketing />);
 
 
