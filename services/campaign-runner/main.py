@@ -43,16 +43,28 @@ def is_working_hours() -> bool:
 
 async def process_email_batch():
     """Process a batch of queued emails."""
-    supabase = get_supabase_client()
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        logger.error(f"Failed to create Supabase client: {e}")
+        return
     
-    # Fetch queued emails
-    emails = get_queued_emails(supabase, limit=BATCH_SIZE)
+    try:
+        # Fetch queued emails
+        emails = get_queued_emails(supabase, limit=BATCH_SIZE)
+    except Exception as e:
+        logger.error(f"Failed to fetch queued emails: {e}", exc_info=True)
+        return
     
     if not emails:
         logger.debug("No queued emails found")
         return
     
     logger.info(f"Processing batch of {len(emails)} emails")
+    
+    processed_count = 0
+    sent_count = 0
+    failed_count = 0
     
     for email in emails:
         email_id = email.get("id")
@@ -63,23 +75,53 @@ async def process_email_batch():
         delay_seconds = email.get("delay_seconds", 0)
         
         if not all([email_id, to_email, from_email, subject, body]):
-            logger.warning(f"Email {email_id} missing required fields, skipping")
-            mark_failed(supabase, email_id, "Missing required fields")
+            logger.warning(
+                f"Email {email_id} missing required fields, skipping",
+                extra={
+                    "email_id": email_id,
+                    "has_to_email": bool(to_email),
+                    "has_from_email": bool(from_email),
+                    "has_subject": bool(subject),
+                    "has_body": bool(body),
+                }
+            )
+            try:
+                mark_failed(supabase, email_id, "Missing required fields")
+            except Exception as e:
+                logger.error(f"Failed to mark email {email_id} as failed: {e}")
+            failed_count += 1
             continue
         
         # Mark as processing (acts as lock)
-        if not mark_processing(supabase, email_id):
-            logger.debug(f"Email {email_id} already being processed, skipping")
+        try:
+            if not mark_processing(supabase, email_id):
+                logger.debug(f"Email {email_id} already being processed, skipping")
+                continue
+        except Exception as e:
+            logger.error(f"Failed to mark email {email_id} as processing: {e}")
             continue
+        
+        processed_count += 1
         
         try:
             # Apply delay
             if delay_seconds > 0:
-                logger.debug(f"Waiting {delay_seconds} seconds before sending email {email_id}")
+                logger.debug(
+                    f"Waiting {delay_seconds} seconds before sending email {email_id}",
+                    extra={"email_id": email_id, "delay_seconds": delay_seconds}
+                )
                 await asyncio.sleep(delay_seconds)
             
             # Send email
-            logger.info(f"Sending email {email_id} to {to_email} from {from_email}")
+            logger.info(
+                f"Sending email {email_id} to {to_email}",
+                extra={
+                    "email_id": email_id,
+                    "to_email": to_email,
+                    "from_email": from_email,
+                    "subject": subject[:50] if subject else None,  # Truncate for logging
+                }
+            )
             success = await send_sparkpost_email(
                 to_email=to_email,
                 from_email=from_email,
@@ -88,41 +130,113 @@ async def process_email_batch():
             )
             
             if success:
-                mark_sent(supabase, email_id)
-                logger.info(f"Email {email_id} sent successfully")
+                try:
+                    mark_sent(supabase, email_id)
+                    logger.info(
+                        f"Email {email_id} sent successfully",
+                        extra={"email_id": email_id, "to_email": to_email}
+                    )
+                    sent_count += 1
+                except Exception as e:
+                    logger.error(
+                        f"Email sent but failed to update status in DB for {email_id}: {e}",
+                        extra={"email_id": email_id}
+                    )
             else:
-                mark_failed(supabase, email_id, "SparkPost API returned error")
-                logger.error(f"Failed to send email {email_id}")
+                try:
+                    mark_failed(supabase, email_id, "SparkPost API returned error")
+                    logger.error(
+                        f"Failed to send email {email_id}",
+                        extra={"email_id": email_id, "to_email": to_email}
+                    )
+                    failed_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to mark email {email_id} as failed: {e}")
                 
         except Exception as e:
             error_msg = str(e)
-            mark_failed(supabase, email_id, error_msg)
-            logger.exception(f"Exception while processing email {email_id}: {error_msg}")
+            try:
+                mark_failed(supabase, email_id, error_msg)
+            except Exception as db_error:
+                logger.error(f"Failed to mark email {email_id} as failed in DB: {db_error}")
+            
+            logger.exception(
+                f"Exception while processing email {email_id}",
+                extra={
+                    "email_id": email_id,
+                    "to_email": to_email,
+                    "error": error_msg,
+                }
+            )
+            failed_count += 1
+    
+    logger.info(
+        f"Batch processing complete: {processed_count} processed, {sent_count} sent, {failed_count} failed",
+        extra={
+            "processed": processed_count,
+            "sent": sent_count,
+            "failed": failed_count,
+            "total": len(emails),
+        }
+    )
 
 
 async def main_loop():
     """Main worker loop."""
-    Config.validate()
-    logger.info("Campaign runner worker starting...")
+    try:
+        Config.validate()
+    except ValueError as e:
+        logger.error(f"Configuration validation failed: {e}")
+        raise
+    
+    logger.info(
+        "Campaign runner worker starting...",
+        extra={
+            "batch_size": BATCH_SIZE,
+            "poll_interval": POLL_INTERVAL_SECONDS,
+            "working_hours": "9am-5pm",
+        }
+    )
+    
+    consecutive_errors = 0
+    max_consecutive_errors = 5
     
     while True:
         try:
             if is_working_hours():
                 await process_email_batch()
+                consecutive_errors = 0  # Reset error counter on success
             else:
                 current_hour = datetime.now().hour
-                logger.debug(f"Outside working hours (current hour: {current_hour}), skipping")
+                logger.debug(
+                    f"Outside working hours (current hour: {current_hour}), skipping",
+                    extra={"current_hour": current_hour}
+                )
             
             # Wait before next poll
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
             
         except KeyboardInterrupt:
-            logger.info("Received interrupt signal, shutting down...")
+            logger.info("Received interrupt signal, shutting down gracefully...")
             break
         except Exception as e:
-            logger.exception(f"Error in main loop: {e}")
-            # Continue running even if there's an error
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            consecutive_errors += 1
+            logger.exception(
+                f"Error in main loop (consecutive errors: {consecutive_errors}): {e}",
+                extra={"consecutive_errors": consecutive_errors}
+            )
+            
+            # If too many consecutive errors, wait longer before retrying
+            if consecutive_errors >= max_consecutive_errors:
+                logger.error(
+                    f"Too many consecutive errors ({consecutive_errors}), "
+                    f"waiting {POLL_INTERVAL_SECONDS * 5} seconds before retry"
+                )
+                await asyncio.sleep(POLL_INTERVAL_SECONDS * 5)
+                consecutive_errors = 0  # Reset after long wait
+            else:
+                # Continue running even if there's an error
+                await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 
 async def main():
