@@ -1,12 +1,19 @@
 """Main entry point for campaign runner worker.
 
 Polls the email_queue table and sends emails via SparkPost API.
-Only sends during working hours (9am-5pm).
+Only sends during working hours (9am-5pm) in the configured timezone.
+
+Scheduling approach:
+- Emails are pre-scheduled with specific `scheduled_for` times during CSV upload
+- The worker fetches emails where `scheduled_for <= NOW()` and sends immediately
+- Domain spacing (e.g., 3.5 min between same-domain emails) is calculated at upload time
+- No delays are applied during sending - timing is controlled by `scheduled_for`
 """
 
 import asyncio
 import logging
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from config import Config
 from db import get_supabase_client, get_queued_emails, mark_processing, mark_sent, mark_failed
@@ -36,8 +43,20 @@ POLL_INTERVAL_SECONDS = 60
 
 
 def is_working_hours() -> bool:
-    """Check if current time is within working hours (9am-5pm)."""
-    current_hour = datetime.now().hour
+    """Check if current time is within working hours (9am-5pm) in configured timezone.
+    
+    Returns:
+        True if current time is between 9am and 5pm in the configured timezone.
+    """
+    try:
+        tz = ZoneInfo(Config.TIMEZONE)
+    except Exception as e:
+        logger.warning(f"Invalid timezone '{Config.TIMEZONE}', falling back to UTC: {e}")
+        tz = ZoneInfo("UTC")
+    
+    # Get current time in the configured timezone
+    current_time = datetime.now(tz)
+    current_hour = current_time.hour
     return 9 <= current_hour < 17
 
 
@@ -72,7 +91,6 @@ async def process_email_batch():
         from_email = email.get("from_email")
         subject = email.get("subject")
         body = email.get("body")
-        delay_seconds = email.get("delay_seconds", 0)
         
         if not all([email_id, to_email, from_email, subject, body]):
             logger.warning(
@@ -104,13 +122,8 @@ async def process_email_batch():
         processed_count += 1
         
         try:
-            # Apply delay
-            if delay_seconds > 0:
-                logger.debug(
-                    f"Waiting {delay_seconds} seconds before sending email {email_id}",
-                    extra={"email_id": email_id, "delay_seconds": delay_seconds}
-                )
-                await asyncio.sleep(delay_seconds)
+            # Note: delay_seconds is no longer used - timing is controlled by scheduled_for
+            # The worker only fetches emails where scheduled_for <= NOW()
             
             # Send email
             logger.info(
@@ -189,12 +202,20 @@ async def main_loop():
         logger.error(f"Configuration validation failed: {e}")
         raise
     
+    # Validate timezone configuration
+    try:
+        ZoneInfo(Config.TIMEZONE)
+        logger.info(f"Using timezone: {Config.TIMEZONE}")
+    except Exception as e:
+        logger.warning(f"Invalid timezone '{Config.TIMEZONE}', will fall back to UTC: {e}")
+    
     logger.info(
         "Campaign runner worker starting...",
         extra={
             "batch_size": BATCH_SIZE,
             "poll_interval": POLL_INTERVAL_SECONDS,
             "working_hours": "9am-5pm",
+            "timezone": Config.TIMEZONE,
         }
     )
     

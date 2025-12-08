@@ -2,6 +2,7 @@
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from supabase import Client, create_client
 
@@ -33,11 +34,14 @@ def get_queued_emails(supabase: Client, limit: int = 20) -> List[Dict[str, Any]]
     # We'll use a transaction approach or rely on status updates for locking
     # For now, we'll fetch and immediately update status to 'processing' to lock
     
+    # Get current time in UTC (scheduled_for is stored as UTC ISO string)
+    now_utc = datetime.now(ZoneInfo("UTC"))
+    
     response = (
         supabase.table("email_queue")
         .select("*")
         .eq("status", "queued")
-        .lte("scheduled_for", datetime.now().isoformat())
+        .lte("scheduled_for", now_utc.isoformat())
         .order("created_at", desc=False)
         .limit(limit)
         .execute()
@@ -82,11 +86,13 @@ def mark_sent(supabase: Client, email_id: int) -> bool:
         True if update succeeded, False otherwise
     """
     try:
+        # Store sent_at in UTC
+        sent_at_utc = datetime.now(ZoneInfo("UTC"))
         response = (
             supabase.table("email_queue")
             .update({
                 "status": "sent",
-                "sent_at": datetime.now().isoformat(),
+                "sent_at": sent_at_utc.isoformat(),
             })
             .eq("id", email_id)
             .execute()

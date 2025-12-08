@@ -23,6 +23,11 @@ class Config:
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
+    # Timezone for working hours (9am-5pm)
+    # Default: Asia/Kolkata (Mumbai)
+    # Production: America/Los_Angeles (Pacific Time)
+    TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Kolkata")
+
     @classmethod
     def validate(cls) -> None:
         """Validate that all required configuration variables are set."""
