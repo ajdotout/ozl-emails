@@ -19,7 +19,8 @@ class Config:
 
     # SparkPost
     SPARKPOST_API_KEY: str = os.getenv("SPARKPOST_API_KEY", "")
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    # GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")  # Commented out - switched to Groq
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 
     # Secrets
     UNSUBSCRIBE_SECRET: str = os.getenv("UNSUBSCRIBE_SECRET", "")
@@ -44,8 +45,10 @@ class Config:
             )
         if not cls.SPARKPOST_API_KEY:
             raise ValueError("SPARKPOST_API_KEY environment variable is required")
-        if not cls.GEMINI_API_KEY:
-            raise ValueError("GEMINI_API_KEY environment variable is required")
+        # if not cls.GEMINI_API_KEY:
+        #     raise ValueError("GEMINI_API_KEY environment variable is required")  # Commented out - switched to Groq
+        if not cls.GROQ_API_KEY:
+            raise ValueError("GROQ_API_KEY environment variable is required")
         if not cls.UNSUBSCRIBE_SECRET:
             raise ValueError("UNSUBSCRIBE_SECRET environment variable is required")
 

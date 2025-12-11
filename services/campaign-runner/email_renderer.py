@@ -75,7 +75,7 @@ def generate_unsubscribe_url(email: str) -> str:
     # But wait, unsubscribe is handled by the NEXT.JS app? Yes, /api/unsubscribe.
     # So it needs to point to the dashboard URL.
     
-    base_url = "https://ozlistings.com" # Defaulting for now
+    base_url = "https://oz-dev-dash-ten.vercel.app"
     
     params = urlencode({'email': email, 'token': token})
     return f"{base_url}/api/unsubscribe?{params}"

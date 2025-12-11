@@ -1,13 +1,19 @@
 """Prompt engineering and AI generation logic."""
 
+import json
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
-from google import genai
+# Gemini imports - commented out for potential rollback
+# from google import genai
+from groq import Groq
 from config import Config
 
-# Initialize GenAI client
-client = genai.Client(api_key=Config.GEMINI_API_KEY)
+# Initialize Groq client
+groq_client = Groq(api_key=Config.GROQ_API_KEY)
+
+# Gemini client initialization - commented out
+# client = genai.Client(api_key=Config.GEMINI_API_KEY)
 
 
 class GeneratedSection(BaseModel):
@@ -114,7 +120,7 @@ def generate_content(
     all_sections: List[Dict[str, Any]],
     recipient_data: Dict[str, Any]
 ) -> Dict[str, str]:
-    """Generate content for a single recipient using Google GenAI.
+    """Generate content for a single recipient using Groq.
     
     Args:
         all_sections: Full list of campaign sections
@@ -134,27 +140,36 @@ def generate_content(
     prompt = build_prompt(all_sections, personalized_sections, recipient_data)
     
     try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash-lite',
-            contents=prompt,
-            config={
-                'response_mime_type': 'application/json',
-                'response_schema': GenerationResponse,
+        # Groq implementation
+        response = groq_client.chat.completions.create(
+            model="moonshotai/kimi-k2-instruct-0905",  # Supports structured outputs
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "generation_response",
+                    "schema": GenerationResponse.model_json_schema(),
+                }
             },
         )
         
-        # Parse Pydantic response
-        # The SDK returns the parsed object directly if response_schema is passed?
-        # Typically it returns a GenerateContentResponse object.
-        # We need to check if .parsed is available (in v1.1+) or parse .text
+        # Parse JSON response from Groq
+        response_content = response.choices[0].message.content
+        if not response_content:
+            raise ValueError("Empty response from AI")
         
-        # Using .parsed property which is available when using schema
-        if not response.parsed:
-             raise ValueError("Empty response from AI")
-             
+        # Parse JSON and validate with Pydantic
+        response_data = json.loads(response_content)
+        parsed_response = GenerationResponse.model_validate(response_data)
+        
         # Map back to dict
         result_map = {}
-        for section in response.parsed.sections:
+        for section in parsed_response.sections:
             result_map[section.section_id] = section.content
             
         return result_map
@@ -163,3 +178,35 @@ def generate_content(
         print(f"AI Generation Error: {e}")
         # Re-raise to trigger retry logic in main loop
         raise e
+    
+    # Gemini implementation - commented out for potential rollback
+    # try:
+    #     response = client.models.generate_content(
+    #         model='gemini-2.5-flash-lite',
+    #         contents=prompt,
+    #         config={
+    #             'response_mime_type': 'application/json',
+    #             'response_schema': GenerationResponse,
+    #         },
+    #     )
+    #     
+    #     # Parse Pydantic response
+    #     # The SDK returns the parsed object directly if response_schema is passed?
+    #     # Typically it returns a GenerateContentResponse object.
+    #     # We need to check if .parsed is available (in v1.1+) or parse .text
+    #     
+    #     # Using .parsed property which is available when using schema
+    #     if not response.parsed:
+    #          raise ValueError("Empty response from AI")
+    #          
+    #     # Map back to dict
+    #     result_map = {}
+    #     for section in response.parsed.sections:
+    #         result_map[section.section_id] = section.content
+    #         
+    #     return result_map
+    #     
+    # except Exception as e:
+    #     print(f"AI Generation Error: {e}")
+    #     # Re-raise to trigger retry logic in main loop
+    #     raise e
