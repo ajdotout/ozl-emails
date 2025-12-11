@@ -49,6 +49,9 @@ async def send_sparkpost_email(
             "from": from_email,
             "subject": subject,
         },
+        "options": {
+            "click_tracking": False,
+        },
     }
 
     if html_body:
