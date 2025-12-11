@@ -327,7 +327,6 @@ def generate_email_text(
     lines.append("")
     lines.append("----")
     lines.append(f"To unsubscribe, visit: {unsubscribe_url}")
-    lines.append(f"Subject: {processed_subject}")
 
     # Remove trailing blank lines
     while lines and lines[-1] == "":
