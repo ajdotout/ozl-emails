@@ -18,7 +18,12 @@ class Config:
     SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
     # SparkPost
-    SPARKPOST_API_KEY: Optional[str] = os.getenv("SPARKPOST_API_KEY")
+    SPARKPOST_API_KEY: str = os.getenv("SPARKPOST_API_KEY", "")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+
+    # Secrets
+    UNSUBSCRIBE_SECRET: str = os.getenv("UNSUBSCRIBE_SECRET", "")
+
 
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
@@ -39,4 +44,8 @@ class Config:
             )
         if not cls.SPARKPOST_API_KEY:
             raise ValueError("SPARKPOST_API_KEY environment variable is required")
+        if not cls.GEMINI_API_KEY:
+            raise ValueError("GEMINI_API_KEY environment variable is required")
+        if not cls.UNSUBSCRIBE_SECRET:
+            raise ValueError("UNSUBSCRIBE_SECRET environment variable is required")
 

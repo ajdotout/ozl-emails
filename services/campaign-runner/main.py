@@ -1,6 +1,7 @@
 """Main entry point for campaign runner worker.
 
 Polls the email_queue table and sends emails via SparkPost API.
+Handles Just-in-Time AI generation for emails with empty bodies.
 Only sends during working hours (9am-5pm) in the configured timezone.
 
 Scheduling approach:
@@ -12,12 +13,24 @@ Scheduling approach:
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from collections import defaultdict
 
 from config import Config
-from db import get_supabase_client, get_queued_emails, mark_processing, mark_sent, mark_failed
+from db import (
+    get_supabase_client, 
+    get_queued_emails, 
+    mark_processing, 
+    mark_sent, 
+    mark_failed,
+    get_campaign,
+    update_generated_body,
+    pause_campaign
+)
 from email_sender import send_sparkpost_email
+import prompts
+import email_renderer
 
 # Configure logging
 logging.basicConfig(
@@ -40,6 +53,7 @@ logger.propagate = False
 # Batch processing configuration
 BATCH_SIZE = 20
 POLL_INTERVAL_SECONDS = 60
+CIRCUIT_BREAKER_THRESHOLD = 10  # Consecutive errors to pause campaign
 
 
 def is_working_hours() -> bool:
@@ -69,7 +83,7 @@ async def process_email_batch():
         return
     
     try:
-        # Fetch queued emails
+        # Fetch queued emails (filtering out paused campaigns)
         emails = get_queued_emails(supabase, limit=BATCH_SIZE)
     except Exception as e:
         logger.error(f"Failed to fetch queued emails: {e}", exc_info=True)
@@ -85,28 +99,27 @@ async def process_email_batch():
     sent_count = 0
     failed_count = 0
     
+    # Track errors per campaign for Circuit Breaker
+    campaign_errors = defaultdict(int)
+    paused_campaigns = set()
+    
     for email in emails:
         email_id = email.get("id")
+        campaign_id = email.get("campaign_id")
         to_email = email.get("to_email")
         from_email = email.get("from_email")
         subject = email.get("subject")
         body = email.get("body")
+        metadata = email.get("metadata") or {}
         
-        if not all([email_id, to_email, from_email, subject, body]):
-            logger.warning(
-                f"Email {email_id} missing required fields, skipping",
-                extra={
-                    "email_id": email_id,
-                    "has_to_email": bool(to_email),
-                    "has_from_email": bool(from_email),
-                    "has_subject": bool(subject),
-                    "has_body": bool(body),
-                }
-            )
-            try:
-                mark_failed(supabase, email_id, "Missing required fields")
-            except Exception as e:
-                logger.error(f"Failed to mark email {email_id} as failed: {e}")
+        # Skip if campaign was just paused in this batch
+        if campaign_id in paused_campaigns:
+            continue
+            
+        # Basic validation
+        if not all([email_id, campaign_id, to_email]):
+            logger.warning(f"Email {email_id} missing ID/Campaign/To, skipping")
+            mark_failed(supabase, email_id, "Missing core fields")
             failed_count += 1
             continue
         
@@ -115,82 +128,106 @@ async def process_email_batch():
             if not mark_processing(supabase, email_id):
                 logger.debug(f"Email {email_id} already being processed, skipping")
                 continue
-        except Exception as e:
-            logger.error(f"Failed to mark email {email_id} as processing: {e}")
+        except Exception:
             continue
-        
+            
         processed_count += 1
         
-        try:
-            # Note: delay_seconds is no longer used - timing is controlled by scheduled_for
-            # The worker only fetches emails where scheduled_for <= NOW()
+        # --- Just-in-Time Generation ---
+        if not body:
+            try:
+                logger.info(f"Generating content for email {email_id} (Campaign {campaign_id})")
+                
+                # 1. Fetch Campaign Sections
+                campaign = get_campaign(supabase, campaign_id)
+                if not campaign:
+                    raise ValueError(f"Campaign {campaign_id} not found")
+                
+                sections = campaign.get("sections", [])
+                email_format = (campaign.get("email_format") or "html").lower()
+                
+                # 2. Generate AI Content (Structured keys)
+                generated_content = prompts.generate_content(sections, metadata)
+                
+                # 3. Render body according to campaign format (html default)
+                # Note: campaign['subject'] is an object {mode, content}, but email_queue has 'subject' string
+                # We use the pre-resolved subject from email_queue if available
+                if email_format == "text":
+                    final_body = email_renderer.generate_email_text(
+                        sections=sections,
+                        subject_line=subject,
+                        recipient_data=metadata,
+                        generated_content=generated_content,
+                    )
+                else:
+                    final_body = email_renderer.generate_email_html(
+                        sections=sections,
+                        subject_line=subject,
+                        recipient_data=metadata,
+                        generated_content=generated_content
+                    )
+                
+                # 4. Save to DB
+                if not update_generated_body(supabase, email_id, final_body):
+                    raise RuntimeError("Failed to save generated body")
+                
+                body = final_body # Update local var for sending
+                
+                # Reset error count on success
+                campaign_errors[campaign_id] = 0
+                
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Generation failed for {email_id}: {error_msg}")
+                
+                # Increment error count
+                campaign_errors[campaign_id] += 1
+                
+                # Check Circuit Breaker
+                if campaign_errors[campaign_id] >= CIRCUIT_BREAKER_THRESHOLD:
+                    logger.critical(f"PAUSING Campaign {campaign_id} due to {campaign_errors[campaign_id]} consecutive errors")
+                    pause_success = pause_campaign(supabase, campaign_id, reason=f"High Failure Rate: {error_msg}")
+                    if pause_success:
+                        paused_campaigns.add(campaign_id)
+                
+                # Handle Retry (Push to End + Jitter?)
+                # For now, just mark Failed. The plan mentions Jitter retry for 429s.
+                # Assuming generic failure for now.
+                mark_failed(supabase, email_id, f"Generation Error: {error_msg}")
+                failed_count += 1
+                continue
+        
+        # --- Sending ---
+        if not body:
+            # Should not happen after generation, but safety check
+            mark_failed(supabase, email_id, "Body is empty after generation")
+            failed_count += 1
+            continue
             
-            # Send email
-            logger.info(
-                f"Sending email {email_id} to {to_email}",
-                extra={
-                    "email_id": email_id,
-                    "to_email": to_email,
-                    "from_email": from_email,
-                    "subject": subject[:50] if subject else None,  # Truncate for logging
-                }
-            )
+        try:
             success = await send_sparkpost_email(
                 to_email=to_email,
                 from_email=from_email,
                 subject=subject,
                 body=body,
+                metadata={"campaign_id": campaign_id, "email_id": email_id}
             )
             
             if success:
-                try:
-                    mark_sent(supabase, email_id)
-                    logger.info(
-                        f"Email {email_id} sent successfully",
-                        extra={"email_id": email_id, "to_email": to_email}
-                    )
-                    sent_count += 1
-                except Exception as e:
-                    logger.error(
-                        f"Email sent but failed to update status in DB for {email_id}: {e}",
-                        extra={"email_id": email_id}
-                    )
+                mark_sent(supabase, email_id)
+                sent_count += 1
             else:
-                try:
-                    mark_failed(supabase, email_id, "SparkPost API returned error")
-                    logger.error(
-                        f"Failed to send email {email_id}",
-                        extra={"email_id": email_id, "to_email": to_email}
-                    )
-                    failed_count += 1
-                except Exception as e:
-                    logger.error(f"Failed to mark email {email_id} as failed: {e}")
+                mark_failed(supabase, email_id, "SparkPost API Error")
+                failed_count += 1
                 
         except Exception as e:
-            error_msg = str(e)
-            try:
-                mark_failed(supabase, email_id, error_msg)
-            except Exception as db_error:
-                logger.error(f"Failed to mark email {email_id} as failed in DB: {db_error}")
-            
-            logger.exception(
-                f"Exception while processing email {email_id}",
-                extra={
-                    "email_id": email_id,
-                    "to_email": to_email,
-                    "error": error_msg,
-                }
-            )
+            logger.error(f"Sending failed for {email_id}: {e}")
+            mark_failed(supabase, email_id, f"Sending Error: {str(e)}")
             failed_count += 1
-    
+            
     logger.info(
-        f"Batch processing complete: {processed_count} processed, {sent_count} sent, {failed_count} failed",
-        extra={
-            "processed": processed_count,
-            "sent": sent_count,
-            "failed": failed_count,
-            "total": len(emails),
-        }
+        f"Batch complete: {processed_count} processed, {sent_count} sent, {failed_count} failed",
+        extra={"paused_campaigns": list(paused_campaigns)}
     )
 
 
@@ -209,59 +246,31 @@ async def main_loop():
     except Exception as e:
         logger.warning(f"Invalid timezone '{Config.TIMEZONE}', will fall back to UTC: {e}")
     
-    logger.info(
-        "Campaign runner worker starting...",
-        extra={
-            "batch_size": BATCH_SIZE,
-            "poll_interval": POLL_INTERVAL_SECONDS,
-            "working_hours": "9am-5pm",
-            "timezone": Config.TIMEZONE,
-        }
-    )
-    
-    consecutive_errors = 0
-    max_consecutive_errors = 5
+    logger.info("Campaign runner worker starting...")
     
     while True:
         try:
             if is_working_hours():
-                await process_email_batch()
-                consecutive_errors = 0  # Reset error counter on success
+                 await process_email_batch()
             else:
-                current_hour = datetime.now().hour
-                logger.debug(
-                    f"Outside working hours (current hour: {current_hour}), skipping",
-                    extra={"current_hour": current_hour}
-                )
+                 # Log every 60 seconds (since POLL_INTERVAL is 60)
+                 logger.info(
+                    "Outside working hours (9am-5pm), sleeping...", 
+                    extra={"timezone": Config.TIMEZONE}
+                 )
+                 pass
             
-            # Wait before next poll
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
             
         except KeyboardInterrupt:
-            logger.info("Received interrupt signal, shutting down gracefully...")
+            logger.info("Shutting down...")
             break
         except Exception as e:
-            consecutive_errors += 1
-            logger.exception(
-                f"Error in main loop (consecutive errors: {consecutive_errors}): {e}",
-                extra={"consecutive_errors": consecutive_errors}
-            )
-            
-            # If too many consecutive errors, wait longer before retrying
-            if consecutive_errors >= max_consecutive_errors:
-                logger.error(
-                    f"Too many consecutive errors ({consecutive_errors}), "
-                    f"waiting {POLL_INTERVAL_SECONDS * 5} seconds before retry"
-                )
-                await asyncio.sleep(POLL_INTERVAL_SECONDS * 5)
-                consecutive_errors = 0  # Reset after long wait
-            else:
-                # Continue running even if there's an error
-                await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            logger.exception(f"Error in main loop: {e}")
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 
 async def main():
-    """Async entrypoint."""
     await main_loop()
 
 
@@ -269,5 +278,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Worker stopped by user")
-
+        pass
