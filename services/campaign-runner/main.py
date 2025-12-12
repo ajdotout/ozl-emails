@@ -203,6 +203,17 @@ async def process_email_batch():
             mark_failed(supabase, email_id, "Body is empty after generation")
             failed_count += 1
             continue
+        
+        # Get campaign name for readable SparkPost campaign_id
+        campaign_name = None
+        if campaign_id:
+            try:
+                campaign = get_campaign(supabase, campaign_id)
+                if campaign:
+                    campaign_name = campaign.get("name")
+            except Exception:
+                # If we can't get campaign name, just use UUID
+                pass
             
         try:
             success = await send_sparkpost_email(
@@ -210,6 +221,8 @@ async def process_email_batch():
                 from_email=from_email,
                 subject=subject,
                 body=body,
+                campaign_id=campaign_id,
+                campaign_name=campaign_name,
                 metadata={"campaign_id": campaign_id, "email_id": email_id}
             )
             

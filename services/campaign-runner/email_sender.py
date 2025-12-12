@@ -1,6 +1,7 @@
 """SparkPost email sending utilities."""
 
 import logging
+import re
 from typing import Any, Dict
 
 import httpx
@@ -17,6 +18,8 @@ async def send_sparkpost_email(
     from_email: str,
     subject: str,
     body: str,
+    campaign_id: str | None = None,
+    campaign_name: str | None = None,
     metadata: Dict[str, Any] | None = None,
 ) -> bool:
     """Send an email via SparkPost transmissions API.
@@ -26,6 +29,8 @@ async def send_sparkpost_email(
         from_email: Sender email address (e.g., "jeff@connect-ozlistings.com")
         subject: Email subject line
         body: Email body (HTML or text)
+        campaign_id: Campaign UUID for tracking
+        campaign_name: Campaign name for readable SparkPost campaign_id
         metadata: Optional metadata to attach to the email
 
     Returns:
@@ -53,6 +58,23 @@ async def send_sparkpost_email(
             "click_tracking": False,
         },
     }
+
+    # Add campaign_id at transmission level for Metrics API tracking
+    # Format: "campaign_name - uuid" for readability in SparkPost dashboard
+    if campaign_id:
+        if campaign_name:
+            # Sanitize campaign name: remove special chars that might break SparkPost (max 64 bytes total)
+            # Keep only alphanumeric, spaces, hyphens, underscores
+            sanitized_name = re.sub(r'[^a-zA-Z0-9\s\-_]', '', campaign_name)
+            # Truncate if needed to ensure total length (name + " - " + uuid) <= 64 bytes
+            # UUID is 36 chars, " - " is 3 chars, so name can be max 25 chars
+            max_name_len = 25
+            if len(sanitized_name) > max_name_len:
+                sanitized_name = sanitized_name[:max_name_len]
+            sparkpost_campaign_id = f"{sanitized_name} - {campaign_id}"
+        else:
+            sparkpost_campaign_id = campaign_id
+        payload["campaign_id"] = sparkpost_campaign_id
 
     if html_body:
         payload["content"]["html"] = html_body
