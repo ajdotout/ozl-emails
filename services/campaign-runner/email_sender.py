@@ -53,6 +53,7 @@ async def send_sparkpost_email(
         "content": {
             "from": from_email,
             "subject": subject,
+            "reply_to": "todd@ozlistings.com",
         },
         "options": {
             "click_tracking": False,
