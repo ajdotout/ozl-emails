@@ -121,63 +121,83 @@ def generate_content(
     recipient_data: Dict[str, Any]
 ) -> Dict[str, str]:
     """Generate content for a single recipient using Groq.
-    
+
     Args:
         all_sections: Full list of campaign sections
         recipient_data: Recipient metadata/CSV row
-        
+
     Returns:
         Dictionary mapping section_id -> generated_content
     """
     personalized_sections = [
-        s for s in all_sections 
+        s for s in all_sections
         if s.get('mode') == 'personalized'
     ]
-    
+
     if not personalized_sections:
         return {}
-        
+
     prompt = build_prompt(all_sections, personalized_sections, recipient_data)
-    
-    try:
-        # Groq implementation
-        response = groq_client.chat.completions.create(
-            model="moonshotai/kimi-k2-instruct-0905",  # Supports structured outputs
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "generation_response",
-                    "schema": GenerationResponse.model_json_schema(),
-                }
-            },
-        )
-        
-        # Parse JSON response from Groq
-        response_content = response.choices[0].message.content
-        if not response_content:
-            raise ValueError("Empty response from AI")
-        
-        # Parse JSON and validate with Pydantic
-        response_data = json.loads(response_content)
-        parsed_response = GenerationResponse.model_validate(response_data)
-        
-        # Map back to dict
-        result_map = {}
-        for section in parsed_response.sections:
-            result_map[section.section_id] = section.content
-            
-        return result_map
-        
-    except Exception as e:
-        print(f"AI Generation Error: {e}")
-        # Re-raise to trigger retry logic in main loop
-        raise e
+
+    # Try primary model first, fallback to base model on rate limits
+    models_to_try = [
+        "moonshotai/kimi-k2-instruct-0905",  # Primary model with version
+        "moonshotai/kimi-k2-instruct"        # Fallback model without version suffix
+    ]
+
+    for model in models_to_try:
+        try:
+            # Groq implementation
+            response = groq_client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "generation_response",
+                        "schema": GenerationResponse.model_json_schema(),
+                    }
+                },
+            )
+
+            # Parse JSON response from Groq
+            response_content = response.choices[0].message.content
+            if not response_content:
+                raise ValueError("Empty response from AI")
+
+            # Parse JSON and validate with Pydantic
+            response_data = json.loads(response_content)
+            parsed_response = GenerationResponse.model_validate(response_data)
+
+            # Map back to dict
+            result_map = {}
+            for section in parsed_response.sections:
+                result_map[section.section_id] = section.content
+
+            return result_map
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            # Check if this is a rate limit error (429) and we have fallback models
+            is_rate_limit = (
+                "429" in error_msg or
+                "rate limit" in error_msg or
+                "too many requests" in error_msg or
+                "quota exceeded" in error_msg
+            )
+
+            if is_rate_limit and model != models_to_try[-1]:
+                print(f"Rate limit hit with model '{model}', trying fallback model '{models_to_try[models_to_try.index(model) + 1]}'")
+                continue
+            else:
+                print(f"AI Generation Error with model '{model}': {e}")
+                # Re-raise to trigger retry logic in main loop
+                raise e
     
     # Gemini implementation - commented out for potential rollback
     # try:

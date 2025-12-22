@@ -264,15 +264,17 @@ async def main_loop():
     while True:
         try:
             if is_working_hours():
+                 logger.info("Polling for queued emails (working hours)...")
                  await process_email_batch()
             else:
                  # Log every 60 seconds (since POLL_INTERVAL is 60)
                  logger.info(
-                    "Outside working hours (9am-5pm), sleeping...", 
+                    "Outside working hours (9am-5pm), sleeping...",
                     extra={"timezone": Config.TIMEZONE}
                  )
                  pass
-            
+
+            logger.debug(f"Sleeping for {POLL_INTERVAL_SECONDS} seconds before next poll")
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
             
         except KeyboardInterrupt:
