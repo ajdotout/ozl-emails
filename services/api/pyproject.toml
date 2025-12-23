@@ -1,0 +1,18 @@
+[project]
+name = "api"
+version = "0.1.0"
+description = "Unified API service for campaign management"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "supabase>=2.24.0",
+    "python-dotenv>=1.2.1",
+    "groq>=1.0.0",
+    "fastapi[standard]>=0.127.0",
+    "pydantic>=2.12.5",
+    "httpx>=0.28.1",
+]
+
+[tool.uv]
+dev-dependencies = []
+
