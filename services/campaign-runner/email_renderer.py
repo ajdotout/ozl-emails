@@ -332,4 +332,4 @@ def generate_email_text(
     while lines and lines[-1] == "":
         lines.pop()
 
-    return "\n".join(lines)
+    return "\r\n".join(lines)
