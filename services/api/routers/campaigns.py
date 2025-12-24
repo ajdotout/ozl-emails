@@ -320,7 +320,7 @@ async def _build_week_schedule(supabase) -> List[Dict[str, Any]]:
     hour = now_zoned.hour
     
     # Day names
-    day_names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
     
     week_schedule = []
     DAYS_TO_SHOW = 7
