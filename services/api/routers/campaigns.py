@@ -674,9 +674,6 @@ async def get_campaign_status(campaign_id: str, admin_user: dict = Depends(verif
     
     # Determine status
     campaign_status = campaign.get("status", "draft")
-    is_generating = campaign_status == "draft" and staged_count == 0 and total_recipients == 0
-    # is_launching is true when launch is in progress (emails being queued but campaign still in staged status)
-    is_launching = campaign_status == "staged" and queued_count > 0
     is_ready = campaign_status == "staged" and staged_count > 0
     is_launched = campaign_status == "scheduled" and queued_count > 0
     
@@ -685,8 +682,6 @@ async def get_campaign_status(campaign_id: str, admin_user: dict = Depends(verif
         "staged_count": staged_count,
         "queued_count": queued_count,
         "total_recipients": total_recipients,
-        "is_generating": is_generating,
-        "is_launching": is_launching,
         "is_ready": is_ready,
         "is_launched": is_launched,
     }
