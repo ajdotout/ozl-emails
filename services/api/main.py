@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import Config
 
 # Import routers
-from routers import campaigns, emails, recipients
+from routers import campaigns, emails, recipients, webhooks
 
 # Validate config on startup
 Config.validate()
@@ -29,6 +29,7 @@ app.add_middleware(
 app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaigns"])
 app.include_router(emails.router, prefix="/api/v1/campaigns", tags=["emails"])
 app.include_router(recipients.router, prefix="/api/v1/campaigns", tags=["recipients"])
+app.include_router(webhooks.router, prefix="/api/webhooks", tags=["webhooks"])
 
 
 @app.get("/health")
