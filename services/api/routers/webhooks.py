@@ -69,7 +69,7 @@ async def sparkpost_webhook(request: Request):
 
                     # Extract recipient email (handle different event types)
                     recipient = None
-                    if event_type in ['bounce', 'unsubscribe', 'spam_complaint', 'delivery', 'click', 'open', 'initial_open']:
+                    if event_type in ['bounce', 'unsubscribe', 'link_unsubscribe', 'list_unsubscribe', 'spam_complaint', 'delivery', 'click', 'open', 'initial_open']:
                         # Email events
                         recipient = event_data.get('rcpt_to') or event_data.get('raw_rcpt_to')
                     elif event_type == 'sms_status':
@@ -78,7 +78,7 @@ async def sparkpost_webhook(request: Request):
                     # Other events might not need recipients (like injection, delay, etc.)
 
                     # Skip events that require recipients but don't have them
-                    if event_type in ['bounce', 'unsubscribe', 'spam_complaint', 'delivery', 'click', 'open', 'initial_open'] and not recipient:
+                    if event_type in ['bounce', 'unsubscribe', 'link_unsubscribe', 'list_unsubscribe', 'spam_complaint', 'delivery', 'click', 'open', 'initial_open'] and not recipient:
                         errors += 1
                         continue
 
@@ -101,8 +101,8 @@ async def sparkpost_webhook(request: Request):
                         if event_type == "bounce":
                             print(f"🔍 Processing bounce: campaign_id={campaign_id}, recipient={recipient}")
                             await record_bounce(campaign_id, recipient, event_data)
-                        elif event_type == "unsubscribe":
-                            # Could be list_unsubscribe or link_unsubscribe
+                        elif event_type in ["link_unsubscribe", "list_unsubscribe"]:
+                            # Handle both link clicks and email client unsubscribe buttons
                             await record_unsubscribe(campaign_id, recipient, event_data)
                         elif event_type == "spam_complaint":
                             await record_spam_complaint(campaign_id, recipient, event_data)
