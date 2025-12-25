@@ -85,6 +85,11 @@ async def sparkpost_webhook(request: Request):
                     # Extract campaign_id (may not be present for all event types)
                     campaign_id = event_data.get('campaign_id')
 
+                    # Parse campaign_id to extract UUID if it's in "name - uuid" format
+                    if campaign_id and " - " in campaign_id:
+                        # Split on " - " and take the last part (the UUID)
+                        campaign_id = campaign_id.split(" - ")[-1]
+
                     # For events that need campaign_id (bounces, unsubscribes, etc.)
                     email_events_requiring_campaign = ['bounce', 'unsubscribe', 'spam_complaint', 'delivery', 'click', 'open', 'initial_open']
                     if event_type in email_events_requiring_campaign and not campaign_id:
@@ -94,6 +99,7 @@ async def sparkpost_webhook(request: Request):
                     # Process based on event type
                     try:
                         if event_type == "bounce":
+                            print(f"🔍 Processing bounce: campaign_id={campaign_id}, recipient={recipient}")
                             await record_bounce(campaign_id, recipient, event_data)
                         elif event_type == "unsubscribe":
                             # Could be list_unsubscribe or link_unsubscribe
