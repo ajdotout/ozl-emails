@@ -34,6 +34,10 @@ class Config:
     # Production: America/Los_Angeles (Pacific Time)
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Kolkata")
 
+    # Disable working hours scheduling restrictions (9am-5pm)
+    # When set to 'true', campaigns can run 24/7
+    DISABLE_WORKING_HOURS: bool = os.getenv("DISABLE_WORKING_HOURS", "false").lower() == "true"
+
     @classmethod
     def validate(cls) -> None:
         """Validate that all required configuration variables are set."""

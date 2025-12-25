@@ -30,6 +30,10 @@ class Config:
     # Timezone for working hours (9am-5pm)
     TIMEZONE: str = os.getenv("TIMEZONE", "America/Los_Angeles")
 
+    # Disable working hours scheduling restrictions (9am-5pm)
+    # When set to 'true', campaigns can run 24/7
+    DISABLE_WORKING_HOURS: bool = os.getenv("DISABLE_WORKING_HOURS", "false").lower() == "true"
+
     # Scheduling
     WORKING_HOUR_START: int = int(os.getenv("WORKING_HOUR_START", "9"))
     WORKING_HOUR_END: int = int(os.getenv("WORKING_HOUR_END", "17"))

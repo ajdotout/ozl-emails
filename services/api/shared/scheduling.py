@@ -84,13 +84,22 @@ def next_weekday_start(
     skip_weekends: bool = True
 ) -> datetime:
     """Get the next weekday start time."""
+    # If working hours are disabled, return current time + 1 minute
+    if Config.DISABLE_WORKING_HOURS:
+        tz = ZoneInfo(timezone)
+        if zoned_time.tzinfo is None:
+            zoned_time = zoned_time.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
+        elif zoned_time.tzinfo != tz:
+            zoned_time = zoned_time.astimezone(tz)
+        return zoned_time + timedelta(minutes=1)
+
     # Ensure zoned_time is in the target timezone
     tz = ZoneInfo(timezone)
     if zoned_time.tzinfo is None:
         zoned_time = zoned_time.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
     elif zoned_time.tzinfo != tz:
         zoned_time = zoned_time.astimezone(tz)
-    
+
     next_day = zoned_time.replace(hour=0, minute=0, second=0, microsecond=0)
     next_day += timedelta(days=1)
 
@@ -115,10 +124,16 @@ def get_start_time_in_timezone(
     skip_weekends: bool = True
 ) -> datetime:
     """Get the start time for scheduling in the specified timezone."""
+    # If working hours are disabled, return current time
+    if Config.DISABLE_WORKING_HOURS:
+        now_utc = datetime.now(ZoneInfo("UTC"))
+        tz = ZoneInfo(timezone)
+        return now_utc.astimezone(tz)
+
     now_utc = datetime.now(ZoneInfo("UTC"))
     tz = ZoneInfo(timezone)
     zoned_time = now_utc.astimezone(tz)
-    
+
     # Ensure we're working with timezone-aware datetime
     if zoned_time.tzinfo is None:
         zoned_time = zoned_time.replace(tzinfo=tz)
@@ -158,6 +173,10 @@ def adjust_to_working_hours(
     skip_weekends: bool = True
 ) -> datetime:
     """Adjust a candidate time to be within working hours."""
+    # If working hours are disabled, return candidate time as-is
+    if Config.DISABLE_WORKING_HOURS:
+        return candidate_time
+
     tz = ZoneInfo(timezone)
     # Ensure candidate_time is timezone-aware
     if candidate_time.tzinfo is None:

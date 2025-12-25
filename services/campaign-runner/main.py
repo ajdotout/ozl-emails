@@ -58,16 +58,21 @@ CIRCUIT_BREAKER_THRESHOLD = 10  # Consecutive errors to pause campaign
 
 def is_working_hours() -> bool:
     """Check if current time is within working hours (9am-5pm) in configured timezone.
-    
+
     Returns:
-        True if current time is between 9am and 5pm in the configured timezone.
+        True if current time is between 9am and 5pm in the configured timezone,
+        or if DISABLE_WORKING_HOURS is set to True.
     """
+    # If working hours restrictions are disabled, always return True
+    if Config.DISABLE_WORKING_HOURS:
+        return True
+
     try:
         tz = ZoneInfo(Config.TIMEZONE)
     except Exception as e:
         logger.warning(f"Invalid timezone '{Config.TIMEZONE}', falling back to UTC: {e}")
         tz = ZoneInfo("UTC")
-    
+
     # Get current time in the configured timezone
     current_time = datetime.now(tz)
     current_hour = current_time.hour
