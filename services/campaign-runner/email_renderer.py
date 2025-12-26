@@ -49,11 +49,12 @@ def replace_variables(content: str, data: Optional[Dict[str, str]]) -> str:
     return re.sub(r'\{\{(\w+)\}\}', replacer, content)
 
 
-def generate_unsubscribe_url(email: str) -> str:
+def generate_unsubscribe_url(email: str, campaign_id: Optional[str] = None) -> str:
     """Generate a signed unsubscribe URL.
     
     Args:
         email: The recipient's email address
+        campaign_id: Optional campaign UUID for attribution
         
     Returns:
         Full unsubscribe URL
@@ -77,7 +78,11 @@ def generate_unsubscribe_url(email: str) -> str:
     
     base_url = "https://oz-dev-dash-ten.vercel.app"
     
-    params = urlencode({'email': email, 'token': token})
+    query_params = {'email': email, 'token': token}
+    if campaign_id:
+        query_params['campaign_id'] = campaign_id
+        
+    params = urlencode(query_params)
     return f"{base_url}/api/unsubscribe?{params}"
 
 
@@ -85,7 +90,8 @@ def generate_email_html(
     sections: List[Dict[str, Any]],
     subject_line: str,
     recipient_data: Dict[str, Any],
-    generated_content: Optional[Dict[str, str]] = None
+    generated_content: Optional[Dict[str, str]] = None,
+    campaign_id: Optional[str] = None
 ) -> str:
     """Generate the full email HTML.
     
@@ -99,7 +105,8 @@ def generate_email_html(
         Full HTML string
     """
     processed_subject = replace_variables(subject_line, recipient_data)
-    unsubscribe_url = generate_unsubscribe_url(recipient_data.get('Email', ''))
+    cid = campaign_id or recipient_data.get('campaign_id') or recipient_data.get('campaignId')
+    unsubscribe_url = generate_unsubscribe_url(recipient_data.get('Email', ''), campaign_id=cid)
     
     sections_html_parts = []
     
@@ -273,11 +280,13 @@ def generate_email_text(
     sections: List[Dict[str, Any]],
     subject_line: str,
     recipient_data: Dict[str, Any],
-    generated_content: Optional[Dict[str, str]] = None
+    generated_content: Optional[Dict[str, str]] = None,
+    campaign_id: Optional[str] = None
 ) -> str:
     """Generate a plain text email body."""
     processed_subject = replace_variables(subject_line, recipient_data)
-    unsubscribe_url = generate_unsubscribe_url(recipient_data.get('Email', ''))
+    cid = campaign_id or recipient_data.get('campaign_id') or recipient_data.get('campaignId')
+    unsubscribe_url = generate_unsubscribe_url(recipient_data.get('Email', ''), campaign_id=cid)
 
     lines: List[str] = []
 

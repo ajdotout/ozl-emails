@@ -163,13 +163,15 @@ async def process_email_batch():
                         subject_line=subject,
                         recipient_data=metadata,
                         generated_content=generated_content,
+                        campaign_id=campaign_id
                     )
                 else:
                     final_body = email_renderer.generate_email_html(
                         sections=sections,
                         subject_line=subject,
                         recipient_data=metadata,
-                        generated_content=generated_content
+                        generated_content=generated_content,
+                        campaign_id=campaign_id
                     )
                 
                 # 4. Save to DB
