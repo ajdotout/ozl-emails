@@ -809,9 +809,9 @@ async def test_send(
     email_format = campaign.get("email_format", "html")
     
     if email_format == "text":
-        body = generate_email_text(sections, subject_line, recipient_data, generated_content)
+        body = generate_email_text(sections, subject_line, recipient_data, generated_content, campaign_id=campaign_id)
     else:
-        body = generate_email_html(sections, subject_line, recipient_data, generated_content)
+        body = generate_email_html(sections, subject_line, recipient_data, generated_content, campaign_id=campaign_id)
     
     # Get domain config
     DOMAIN_CONFIG = generate_domain_config(campaign.get("sender", "jeff_richmond"))

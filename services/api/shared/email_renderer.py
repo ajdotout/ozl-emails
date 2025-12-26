@@ -22,7 +22,7 @@ BRAND = {
 }
 
 
-def generate_unsubscribe_url(email: str) -> str:
+def generate_unsubscribe_url(email: str, campaign_id: Optional[str] = None) -> str:
     """Generate a signed unsubscribe URL."""
     secret = Config.UNSUBSCRIBE_SECRET.encode('utf-8')
     msg = email.lower().encode('utf-8')
@@ -30,7 +30,11 @@ def generate_unsubscribe_url(email: str) -> str:
     token = hmac.new(secret, msg, hashlib.sha256).hexdigest()[:16]
     base_url = Config.FRONTEND_URL
     
-    params = urlencode({'email': email, 'token': token})
+    params_dict = {'email': email, 'token': token}
+    if campaign_id:
+        params_dict['campaign_id'] = campaign_id
+        
+    params = urlencode(params_dict)
     return f"{base_url}/api/unsubscribe?{params}"
 
 
@@ -38,13 +42,15 @@ def generate_email_html(
     sections: List[Dict[str, Any]],
     subject_line: str,
     recipient_data: Dict[str, Any],
-    generated_content: Optional[Dict[str, str]] = None
+    generated_content: Optional[Dict[str, str]] = None,
+    campaign_id: Optional[str] = None
 ) -> str:
     """Generate the full email HTML."""
     from shared.email import replace_variables
     
     processed_subject = replace_variables(subject_line, recipient_data)
-    unsubscribe_url = generate_unsubscribe_url(recipient_data.get('Email', ''))
+    cid = campaign_id or recipient_data.get('campaign_id') or recipient_data.get('campaignId')
+    unsubscribe_url = generate_unsubscribe_url(recipient_data.get('Email', ''), campaign_id=cid)
     
     sections_html_parts = []
     
@@ -202,13 +208,15 @@ def generate_email_text(
     sections: List[Dict[str, Any]],
     subject_line: str,
     recipient_data: Dict[str, Any],
-    generated_content: Optional[Dict[str, str]] = None
+    generated_content: Optional[Dict[str, str]] = None,
+    campaign_id: Optional[str] = None
 ) -> str:
     """Generate a plain text email body."""
     from shared.email import replace_variables
     
     processed_subject = replace_variables(subject_line, recipient_data)
-    unsubscribe_url = generate_unsubscribe_url(recipient_data.get('Email', ''))
+    cid = campaign_id or recipient_data.get('campaign_id') or recipient_data.get('campaignId')
+    unsubscribe_url = generate_unsubscribe_url(recipient_data.get('Email', ''), campaign_id=cid)
 
     lines: List[str] = []
 
