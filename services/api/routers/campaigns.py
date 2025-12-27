@@ -715,32 +715,105 @@ async def get_campaign_summary(campaign_id: str, admin_user: dict = Depends(veri
     staged = count_for_status("staged")
     
     # Get last sent
-    last_sent_response = supabase.table("email_queue").select("sent_at").eq("campaign_id", campaign_id).eq("status", "sent").order("sent_at", desc=True).limit(1).single().execute()
-    last_sent_at = last_sent_response.data.get("sent_at") if last_sent_response.data else None
-    
+    last_sent_response = supabase.table("email_queue").select("sent_at").eq("campaign_id", campaign_id).eq("status", "sent").order("sent_at", desc=True).limit(1).execute()
+    last_sent_at = last_sent_response.data[0]["sent_at"] if last_sent_response.data and len(last_sent_response.data) > 0 else None
+
     # Get next scheduled
-    next_scheduled_response = supabase.table("email_queue").select("scheduled_for").eq("campaign_id", campaign_id).eq("status", "queued").order("scheduled_for", desc=False).limit(1).single().execute()
-    next_scheduled_for = next_scheduled_response.data.get("scheduled_for") if next_scheduled_response.data else None
+    next_scheduled_response = supabase.table("email_queue").select("scheduled_for").eq("campaign_id", campaign_id).eq("status", "queued").order("scheduled_for", desc=False).limit(1).execute()
+    next_scheduled_for = next_scheduled_response.data[0]["scheduled_for"] if next_scheduled_response.data and len(next_scheduled_response.data) > 0 else None
     
-    # SparkPost metrics (simplified - can be enhanced)
+    # SparkPost metrics
     sparkpost_metrics = {
         "deliveryRate": None,
         "bounceRate": None,
         "countDelivered": None,
         "countBounced": None,
+        "unsubscribeRate": None,
+        "countUnsubscribed": None,
     }
-    
+
     if Config.SPARKPOST_API_KEY and sent > 0:
         try:
-            # Construct SparkPost campaign_id
+            import httpx
+            import re
+
+            # Construct SparkPost campaign_id (same logic as in email_sender.py)
             campaign_name = campaign.get("name", "")
-            sanitized_name = campaign_name[:25] if len(campaign_name) <= 25 else campaign_name[:25]
-            sparkpost_campaign_id = f"{sanitized_name} - {campaign_id}"
-            
-            # Fetch metrics (simplified - full implementation would use proper date ranges)
-            # This is a placeholder - full implementation would call SparkPost Metrics API
-            pass
-        except Exception:
+            if campaign_name:
+                sanitized_name = re.sub(r'[^a-zA-Z0-9\s\-_]', '', campaign_name)
+                max_name_len = 25
+                if len(sanitized_name) > max_name_len:
+                    sanitized_name = sanitized_name[:max_name_len]
+                sparkpost_campaign_id = f"{sanitized_name} - {campaign_id}"
+            else:
+                sparkpost_campaign_id = campaign_id
+
+            # Fetch metrics from SparkPost API
+            metrics_url = "https://api.sparkpost.com/api/v1/metrics/deliverability"
+
+            # Use campaign creation date as start, and 30 days after as end (or current time if campaign is still active)
+            campaign_created_at = campaign.get("created_at")
+            now = datetime.now(ZoneInfo("UTC"))
+            if campaign_created_at:
+                # Parse the ISO datetime string and ensure it's UTC
+                if campaign_created_at.endswith('Z'):
+                    from_date = datetime.fromisoformat(campaign_created_at[:-1] + '+00:00')
+                else:
+                    from_date = datetime.fromisoformat(campaign_created_at)
+                # Ensure from_date is timezone-aware
+                if from_date.tzinfo is None:
+                    from_date = from_date.replace(tzinfo=ZoneInfo("UTC"))
+                to_date = min(from_date + timedelta(days=30), now)
+            else:
+                # Fallback to last 30 days if no creation date
+                from_date = now - timedelta(days=30)
+                to_date = now
+
+            # Query metrics for this specific campaign within its active period
+            params = {
+                "campaigns": sparkpost_campaign_id,
+                "metrics": "count_delivered,count_bounce,count_unsubscribe,count_injected",
+                "from": from_date.strftime("%Y-%m-%dT%H:%M"),
+                "to": to_date.strftime("%Y-%m-%dT%H:%M"),
+            }
+
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(
+                    metrics_url,
+                    params=params,
+                    headers={
+                        "Authorization": Config.SPARKPOST_API_KEY,
+                        "Content-Type": "application/json",
+                    },
+                )
+
+                if response.is_success:
+                    data = response.json()
+                    results = data.get("results", [])
+
+                    if results:
+                        # Aggregate metrics across all results
+                        total_delivered = sum(r.get("count_delivered", 0) for r in results)
+                        total_bounced = sum(r.get("count_bounce", 0) for r in results)
+                        total_unsubscribed = sum(r.get("count_unsubscribe", 0) for r in results)
+                        total_injected = sum(r.get("count_injected", 0) for r in results)
+
+                        # Calculate rates
+                        if total_injected > 0:
+                            delivery_rate = (total_delivered / total_injected) * 100
+                            bounce_rate = (total_bounced / total_injected) * 100
+                            unsubscribe_rate = (total_unsubscribed / total_delivered) * 100 if total_delivered > 0 else 0
+
+                            sparkpost_metrics = {
+                                "deliveryRate": round(delivery_rate, 1),
+                                "bounceRate": round(bounce_rate, 1),
+                                "countDelivered": total_delivered,
+                                "countBounced": total_bounced,
+                                "unsubscribeRate": round(unsubscribe_rate, 1),
+                                "countUnsubscribed": total_unsubscribed,
+                            }
+        except Exception as e:
+            logger.warning(f"Failed to fetch SparkPost metrics for campaign {campaign_id}: {e}")
             pass
     
     return {
