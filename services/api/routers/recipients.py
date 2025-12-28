@@ -45,16 +45,24 @@ async def add_recipients(
     # Prepare recipient rows
     recipients = []
     selected_emails = request.selected_emails or {}
-    
+
     for contact_id in request.contact_ids:
         recipients.append({
             "campaign_id": campaign_id,
             "contact_id": contact_id,
             "selected_email": selected_emails.get(contact_id),
         })
-    
-    # Insert recipients
+
+    # Replace existing recipients for this campaign
+    supabase.table("campaign_recipients").delete().eq("campaign_id", campaign_id).execute()
+
+    # Insert new recipients
     supabase.table("campaign_recipients").insert(recipients).execute()
-    
+
+    # Update campaign total_recipients count
+    supabase.table("campaigns").update({
+        "total_recipients": len(recipients)
+    }).eq("id", campaign_id).execute()
+
     return {"success": True, "count": len(recipients)}
 
