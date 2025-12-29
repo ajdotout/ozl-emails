@@ -90,7 +90,13 @@ async def process_generate_task(campaign_id: str, supabase: Client):
                 "Role": contact_data.get("role") or "",
                 "Location": contact_data.get("location") or "",
             }
-            
+
+            # Programmatically split name for personalization
+            full_name = contact_data.get("name") or ""
+            name_parts = full_name.strip().split(" ", 1) if full_name.strip() else ["", ""]
+            row["FirstName"] = name_parts[0] if name_parts[0] else ""
+            row["LastName"] = name_parts[1] if len(name_parts) > 1 else ""
+
             # Remove lowercase duplicates
             for key in ["name", "email", "company", "role", "location"]:
                 row.pop(key, None)
