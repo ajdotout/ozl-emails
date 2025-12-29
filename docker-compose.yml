@@ -1,0 +1,57 @@
+services:
+  # Caddy reverse proxy with automatic HTTPS
+  caddy:
+    image: caddy:2.8.4-alpine  # Alpine variant for smaller size
+    container_name: ozl-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - web
+    depends_on:
+      - api
+
+  # Main API service
+  api:
+    build: ./services/api
+    container_name: ozl-api
+    env_file:
+      - ./services/api/.env
+    networks:
+      - web
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Campaign runner worker
+  campaign-runner:
+    build: ./services/campaign-runner
+    container_name: ozl-campaign-runner
+    env_file:
+      - ./services/campaign-runner/.env
+    volumes:
+      - /var/log/ozl:/var/log/ozl
+    networks:
+      - web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+networks:
+  web:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
