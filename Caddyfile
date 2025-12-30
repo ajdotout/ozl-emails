@@ -1,8 +1,4 @@
-http://localhost {
-    # Explicit HTTP for local testing
-    # No TLS directive = HTTP only
-    
-
+api.ozlistings.com {
     # Health check endpoint
     handle /health {
         respond "OK" 200
