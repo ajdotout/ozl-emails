@@ -792,30 +792,47 @@ async def get_campaign_summary(campaign_id: str, admin_user: dict = Depends(veri
                     results = data.get("results", [])
 
                     if results:
-                        # Aggregate metrics across all results
+                        # Aggregate metrics across all results (excluding unsubscribe data)
                         total_delivered = sum(r.get("count_delivered", 0) for r in results)
                         total_bounced = sum(r.get("count_bounce", 0) for r in results)
-                        total_unsubscribed = sum(r.get("count_unsubscribe", 0) for r in results)
                         total_injected = sum(r.get("count_injected", 0) for r in results)
 
-                        # Calculate rates
+                        # Calculate delivery and bounce rates (unchanged)
                         if total_injected > 0:
                             delivery_rate = (total_delivered / total_injected) * 100
                             bounce_rate = (total_bounced / total_injected) * 100
-                            unsubscribe_rate = (total_unsubscribed / total_delivered) * 100 if total_delivered > 0 else 0
 
-                            sparkpost_metrics = {
-                                "deliveryRate": round(delivery_rate, 1),
-                                "bounceRate": round(bounce_rate, 1),
-                                "countDelivered": total_delivered,
-                                "countBounced": total_bounced,
-                                "unsubscribeRate": round(unsubscribe_rate, 1),
-                                "countUnsubscribed": total_unsubscribed,
-                            }
+                            sparkpost_metrics["deliveryRate"] = round(delivery_rate, 1)
+                            sparkpost_metrics["bounceRate"] = round(bounce_rate, 1)
+                            sparkpost_metrics["countDelivered"] = total_delivered
+                            sparkpost_metrics["countBounced"] = total_bounced
         except Exception as e:
             logger.warning(f"Failed to fetch SparkPost metrics for campaign {campaign_id}: {e}")
             pass
-    
+
+    # Get unsubscribe count from database (campaign_recipients table)
+    try:
+        unsubscribe_response = supabase.table("campaign_recipients").select("id", count="exact").eq("campaign_id", campaign_id).not_("unsubscribed_at", "is", None).execute()
+        db_unsubscribe_count = unsubscribe_response.count or 0
+
+        # Update metrics with database unsubscribe data
+        sparkpost_metrics["countUnsubscribed"] = db_unsubscribe_count
+
+        # Calculate unsubscribe rate using database unsubscribes and SparkPost delivered count
+        if sparkpost_metrics["countDelivered"] and sparkpost_metrics["countDelivered"] > 0:
+            unsubscribe_rate = (db_unsubscribe_count / sparkpost_metrics["countDelivered"]) * 100
+            sparkpost_metrics["unsubscribeRate"] = round(unsubscribe_rate, 1)
+        else:
+            # Fallback: if no SparkPost delivered data, use sent emails as denominator
+            if sent > 0:
+                unsubscribe_rate = (db_unsubscribe_count / sent) * 100
+                sparkpost_metrics["unsubscribeRate"] = round(unsubscribe_rate, 1)
+
+    except Exception as e:
+        logger.warning(f"Failed to fetch unsubscribe count from database for campaign {campaign_id}: {e}")
+        # Keep unsubscribe fields as None if database query fails
+        pass
+
     return {
         "success": True,
         "counts": {
