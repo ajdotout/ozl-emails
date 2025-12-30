@@ -812,7 +812,7 @@ async def get_campaign_summary(campaign_id: str, admin_user: dict = Depends(veri
 
     # Get unsubscribe count from database (campaign_recipients table)
     try:
-        unsubscribe_response = supabase.table("campaign_recipients").select("id", count="exact").eq("campaign_id", campaign_id).not_("unsubscribed_at", "is", None).execute()
+        unsubscribe_response = supabase.table("campaign_recipients").select("id", count="exact").eq("campaign_id", campaign_id).not_.is_("unsubscribed_at", "null").execute()
         db_unsubscribe_count = unsubscribe_response.count or 0
 
         # Update metrics with database unsubscribe data
