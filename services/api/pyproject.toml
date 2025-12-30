@@ -11,6 +11,7 @@ dependencies = [
     "fastapi[standard]>=0.127.0",
     "pydantic>=2.12.5",
     "httpx>=0.28.1",
+    "requests>=2.31.0",
 ]
 
 [tool.uv]

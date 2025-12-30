@@ -1,0 +1,17 @@
+api.ozlistings.com {
+    # Health check endpoint
+    handle /health {
+        respond "OK" 200
+    }
+
+    # All API routes - forward directly to backend (no prefix stripping)
+    # Frontend calls /api/backend-proxy/*, Next.js proxy forwards to /api/v1/*
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+
+    # Default handler - serve API for all other routes
+    handle {
+        reverse_proxy api:8000
+    }
+}
